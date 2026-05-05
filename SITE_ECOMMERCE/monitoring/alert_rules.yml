@@ -1,0 +1,11 @@
+groups:
+  - name: services
+    rules:
+      - alert: CatalogueDown
+        expr: up{job="catalogue"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service catalogue indisponible"
+          description: "Le service catalogue ne répond plus depuis plus d'une minute."

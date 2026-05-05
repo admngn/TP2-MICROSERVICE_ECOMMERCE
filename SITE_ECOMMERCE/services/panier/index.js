@@ -1,4 +1,5 @@
 const express = require('express');
+const client = require('prom-client');
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
@@ -12,14 +13,34 @@ app.use((req, res, next) => {
 // Stockage en mémoire (pas de DB pour simplifier)
 let cart = [];
 
-// ── TODO ETUDIANT : instrumenter avec prom-client ──────────────────────────
-// const client = require('prom-client');
-// ...
+// ── TODO ETUDIANT : instrumenter avec prom-client ── DONE ──────────────────
+client.collectDefaultMetrics();
+const httpRequestsTotal = new client.Counter({
+  name: 'http_requests_total',
+  help: 'Nombre total de requêtes HTTP',
+  labelNames: ['method', 'route', 'status'],
+});
+const httpRequestDuration = new client.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'Durée des requêtes HTTP en secondes',
+  labelNames: ['method', 'route', 'status'],
+  buckets: [0.01, 0.05, 0.1, 0.3, 1, 3],
+});
+app.use((req, res, next) => {
+  if (req.path === '/metrics') return next();
+  const end = httpRequestDuration.startTimer();
+  res.on('finish', () => {
+    const route = req.route?.path || req.path;
+    const labels = { method: req.method, route, status: res.statusCode };
+    httpRequestsTotal.inc(labels);
+    end(labels);
+  });
+  next();
+});
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'panier', items: cart.length }));
 
 app.get('/cart', (req, res) => {
-  // TODO : incrémenter un counter
   res.json(cart);
 });
 
@@ -44,7 +65,11 @@ app.delete('/cart', (req, res) => {
   res.json({ message: 'Panier vidé' });
 });
 
-// TODO ETUDIANT : exposer GET /metrics
+// TODO ETUDIANT : exposer GET /metrics — DONE
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', client.register.contentType);
+  res.end(await client.register.metrics());
+});
 
 const PORT = 3002;
 app.listen(PORT, () => console.log(`[panier] http://localhost:${PORT}`));
