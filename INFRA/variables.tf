@@ -5,7 +5,7 @@ variable "resource_group_name" {
 
 variable "location" {
   type = string
-  default = "germanywestcentral"
+  default = "westeurope"
 }
 
 variable "vm_name" {
@@ -15,7 +15,7 @@ variable "vm_name" {
 
 variable "vm_size" {
   type = string
-  default = "Standard_B2s"
+  default = "Standard_B1ms"
 }
 
 variable "admin_username" {
