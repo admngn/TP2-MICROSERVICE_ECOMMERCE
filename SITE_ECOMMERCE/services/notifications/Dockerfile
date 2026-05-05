@@ -1,8 +1,14 @@
 # TODO ETUDIANT : transformer en multi-stage build
-FROM node:20-alpine
+FROM node:20-alpine as builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --production
 COPY . .
+
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/index.js ./
+COPY --from=builder /app/package.json ./ 
 EXPOSE 3004
 CMD ["node", "index.js"]
