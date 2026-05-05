@@ -1,42 +1,66 @@
 resource "azurerm_resource_group" "rg" {
-  name     = var.resource_group_name
+  name = var.resource_group_name
   location = var.location
+}
 
-  tags = {
-    Environment = var.environment
-    Project     = var.project
-    ManagedBy   = "Terraform"
-    Student     = "true"
+resource "azurerm_virtual_network" "vnet" {
+  name = "vnet-devshop"
+  address_space = ["10.0.0.0/16"]
+  location = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+resource "azurerm_subnet" "subnet" {
+  name = "subnet-devshop"
+  resource_group_name = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes = ["10.0.1.0/24"]
+}
+
+resource "azurerm_public_ip" "pip" {
+  name = "pip-devshop"
+  location = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method = "Static"
+  sku = "Standard"
+}
+
+resource "azurerm_network_interface" "nic" {
+  name = "nic-devshop"
+  location = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name = "internal"
+    subnet_id = azurerm_subnet.subnet.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id = azurerm_public_ip.pip.id
   }
 }
 
-resource "azurerm_kubernetes_cluster" "aks" {
-  name                = var.cluster_name
-  location            = azurerm_resource_group.rg.location
+resource "azurerm_linux_virtual_machine" "vm" {
+  name = var.vm_name
   resource_group_name = azurerm_resource_group.rg.name
-  dns_prefix          = "${var.cluster_name}-dns"
+  location = azurerm_resource_group.rg.location
+  size = var.vm_size
+  admin_username = var.admin_username
+  network_interface_ids = [azurerm_network_interface.nic.id]
+  disable_password_authentication = true
 
-  default_node_pool {
-    name            = "default"
-    node_count      = var.node_count
-    vm_size         = var.vm_size
-    os_disk_size_gb = 30
-    type            = "VirtualMachineScaleSets"
+  admin_ssh_key {
+    username = var.admin_username
+    public_key = file(var.ssh_public_key_path)
   }
 
-  identity {
-    type = "SystemAssigned"
+  os_disk {
+    caching = "ReadWrite"
+    storage_account_type = "Standard_LRS"
   }
 
-  network_profile {
-    network_plugin    = "kubenet"
-    load_balancer_sku = "standard"
-  }
-
-  tags = {
-    Environment = var.environment
-    Project     = var.project
-    ManagedBy   = "Terraform"
-    Student     = "true"
+  source_image_reference {
+    publisher = "Canonical"
+    offer = "0001-com-ubuntu-server-jammy"
+    sku = "22_04-lts-gen2"
+    version = "latest"
   }
 }
