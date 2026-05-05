@@ -8,12 +8,12 @@
 
 # Node
 node_modules/
-npm-debug.log
+npm-debug.log*
 .env
 .env.local
 
 # Terraform
-**/.terraform/
+.terraform/
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
@@ -31,6 +31,6 @@ terraform.rc
 # Logs
 *.log
 
-# Docker volumes locaux
+# Data local
 data/
 volumes/
