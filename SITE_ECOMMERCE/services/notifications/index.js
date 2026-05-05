@@ -1,6 +1,8 @@
 const express = require('express');
-const client = require('prom-client');
+const logger = require('./logger');
+const { metricsMiddleware, generateMetrics } = require('./metrics');
 const app = express();
+
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -12,33 +14,36 @@ app.use((req, res, next) => {
 
 let notifications = [];
 
-// ── TODO ETUDIANT : instrumenter avec prom-client ── DONE ──────────────────
-// Idée : counter de notifications envoyées par type
-client.collectDefaultMetrics();
-const httpRequestsTotal = new client.Counter({
-  name: 'http_requests_total',
-  help: 'Nombre total de requêtes HTTP',
-  labelNames: ['method', 'route', 'status'],
-});
-const httpRequestDuration = new client.Histogram({
-  name: 'http_request_duration_seconds',
-  help: 'Durée des requêtes HTTP en secondes',
-  labelNames: ['method', 'route', 'status'],
-  buckets: [0.01, 0.05, 0.1, 0.3, 1, 3],
-});
+app.use(metricsMiddleware);
+
 app.use((req, res, next) => {
-  if (req.path === '/metrics') return next();
-  const end = httpRequestDuration.startTimer();
+  if (req.path === '/health' || req.path === '/metrics') return next();
+  const start = Date.now();
   res.on('finish', () => {
-    const route = req.route?.path || req.path;
-    const labels = { method: req.method, route, status: res.statusCode };
-    httpRequestsTotal.inc(labels);
-    end(labels);
+    logger.info('Request handled', {
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration_ms: Date.now() - start,
+    });
   });
   next();
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'notifications', sent: notifications.length }));
+app.get('/health', (req, res) => {
+  const used_mb = Math.round(process.memoryUsage().rss / 1024 / 1024 * 100) / 100;
+  res.json({
+    status: used_mb > 400 ? 'degraded' : 'ok',
+    service: 'notifications',
+    version: '1.0.0',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    checks: {
+      memory: { status: used_mb > 400 ? 'degraded' : 'ok', used_mb, threshold_mb: 400 },
+      dataStore: { status: 'ok', records: notifications.length }
+    }
+  });
+});
 
 app.post('/notify', (req, res) => {
   const { orderId, total } = req.body;
@@ -51,17 +56,40 @@ app.post('/notify', (req, res) => {
     sentAt: new Date().toISOString(),
   };
   notifications.push(notif);
-  console.log('[notifications] 📧', notif.message);
+  logger.info('Notification sent', { message: notif.message, orderId: notif.orderId });
   res.status(201).json(notif);
 });
 
 app.get('/notifications', (req, res) => res.json(notifications));
 
-// TODO ETUDIANT : exposer GET /metrics — DONE
-app.get('/metrics', async (req, res) => {
-  res.set('Content-Type', client.register.contentType);
-  res.end(await client.register.metrics());
+app.get('/metrics', (req, res) => {
+  res.set('Content-Type', 'text/plain; version=0.0.4');
+  res.send(generateMetrics('notifications', { records_total: notifications.length }));
+});
+
+app.use((req, res) => {
+  logger.warn('Route not found', { method: req.method, path: req.path });
+  res.status(404).json({ error: 'Not Found', message: `La route ${req.method} ${req.path} n'existe pas` });
+});
+
+app.use((err, req, res, next) => {
+  logger.error('Unhandled error', { error: err.message, path: req.path, method: req.method });
+  res.status(500).json({ error: 'Internal Server Error', message: 'Une erreur inattendue s\'est produite', requestId: Date.now().toString() });
 });
 
 const PORT = 3004;
-app.listen(PORT, () => console.log(`[notifications] http://localhost:${PORT}`));
+const server = app.listen(PORT, () => {
+  logger.info('Service started', { port: PORT });
+});
+
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    logger.info('Server closed — all connections drained');
+    process.exit(0);
+  });
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+});

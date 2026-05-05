@@ -88,6 +88,29 @@ services:
       timeout: 3s
       retries: 3
 
+  # ── Gateway (Point d'entrée TP2) ──────────────────────────────────
+  gateway:
+    build: ./services/gateway
+    ports:
+      - "3000:3000"
+    networks:
+      - devshop
+    restart: unless-stopped
+    depends_on:
+      catalogue:
+        condition: service_healthy
+      panier:
+        condition: service_healthy
+      commandes:
+        condition: service_healthy
+      notifications:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # ── Prometheus ────────────────────────────────────────────────────
   # TODO : décommenter et configurer — DONE
   prometheus:
@@ -106,7 +129,8 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "3005:3000"
+
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
