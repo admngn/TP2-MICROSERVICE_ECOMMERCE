@@ -4,8 +4,7 @@ const app = express();
 
 app.use(express.json());
 
-// --- CODE ISSU DU README : Rate Limiter ---
-const store = {}; // { "ip_address": { count: N, resetAt: timestamp } }
+const store = {}; 
 const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS = 100;
 
@@ -13,10 +12,7 @@ function rateLimiter(req, res, next) {
   const ip = req.ip || '0.0.0.0';
   const now = Date.now();
 
-  if (!store[ip]) {
-    store[ip] = { count: 0, resetAt: now + WINDOW_MS };
-  }
-
+  if (!store[ip]) store[ip] = { count: 0, resetAt: now + WINDOW_MS };
   if (now > store[ip].resetAt) {
     store[ip].count = 0;
     store[ip].resetAt = now + WINDOW_MS;
@@ -31,65 +27,42 @@ function rateLimiter(req, res, next) {
   if (store[ip].count > MAX_REQUESTS) {
     return res.status(429).json({ error: 'Too Many Requests' });
   }
-
   next();
 }
 
-// TODO : nettoyer le store périodiquement pour éviter les fuites mémoire
 setInterval(() => {
   const now = Date.now();
   for (const ip in store) {
-    if (now > store[ip].resetAt) {
-      delete store[ip];
-    }
+    if (now > store[ip].resetAt) delete store[ip];
   }
 }, WINDOW_MS);
 
 app.use(rateLimiter);
 
-// --- CODE ISSU DU README : Retry avec backoff exponentiel ---
 async function withRetry(fn, options = {}) {
-  const {
-    maxAttempts = 3,
-    baseDelayMs = 200,
-    maxDelayMs = 5000,
-    onRetry = null,
-  } = options;
-
+  const { maxAttempts = 3, baseDelayMs = 200, maxDelayMs = 5000, onRetry = null } = options;
   let lastError;
-
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastError = err;
-
-      // Ne pas retenter si c'est une erreur client (4xx)
-      if (err.response && err.response.status >= 400 && err.response.status < 500) {
-        throw err;
-      }
-
+      if (err.response && err.response.status >= 400 && err.response.status < 500) throw err;
       if (attempt === maxAttempts) break;
-
-      // Backoff exponentiel avec jitter
       const exponentialDelay = baseDelayMs * Math.pow(2, attempt - 1);
       const jitter = Math.random() * exponentialDelay * 0.3;
       const delay = Math.min(exponentialDelay + jitter, maxDelayMs);
-
       if (onRetry) onRetry(attempt, delay, err.message);
-
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
-
   throw lastError;
 }
 
-// --- PROXY ROUTING (Pour renvoyer vers vos services existants) ---
-const CATALOGUE_URL = 'http://localhost:3001';
-const PANIER_URL = 'http://localhost:3002';
-const COMMANDES_URL = 'http://localhost:3003';
-const NOTIFICATIONS_URL = 'http://localhost:3004';
+const CATALOGUE_URL = 'http://catalogue:3001';
+const PANIER_URL = 'http://panier:3002';
+const COMMANDES_URL = 'http://commandes:3003';
+const NOTIFICATIONS_URL = 'http://notifications:3004';
 
 async function proxyRequest(req, res, targetUrl) {
     try {
@@ -110,13 +83,11 @@ async function proxyRequest(req, res, targetUrl) {
     }
 }
 
-// Routes demandées par le README pour le Gateway
-app.all('/products(.*)', (req, res) => proxyRequest(req, res, `${CATALOGUE_URL}${req.originalUrl}`));
-app.all('/cart(.*)', (req, res) => proxyRequest(req, res, `${PANIER_URL}${req.originalUrl}`));
-app.all('/orders(.*)', (req, res) => proxyRequest(req, res, `${COMMANDES_URL}${req.originalUrl}`));
-app.all('/notifications(.*)', (req, res) => proxyRequest(req, res, `${NOTIFICATIONS_URL}${req.originalUrl}`));
+app.use('/products', (req, res) => proxyRequest(req, res, `${CATALOGUE_URL}/products${req.url}`));
+app.use('/cart', (req, res) => proxyRequest(req, res, `${PANIER_URL}/cart${req.url}`));
+app.use('/orders', (req, res) => proxyRequest(req, res, `${COMMANDES_URL}/orders${req.url}`));
+app.use('/notifications', (req, res) => proxyRequest(req, res, `${NOTIFICATIONS_URL}/notifications${req.url}`));
 
-// --- HEALTH CHECK AGRÉGÉ (Format exact du README) ---
 app.get('/health', async (req, res) => {
   const start = Date.now();
   const checks = await Promise.allSettled([
@@ -148,7 +119,6 @@ app.get('/health', async (req, res) => {
 
   res.status(degraded ? 503 : 200).json(response);
 });
-
 
 const PORT = 3000;
 app.listen(PORT, () => {

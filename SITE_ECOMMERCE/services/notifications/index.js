@@ -20,12 +20,7 @@ app.use((req, res, next) => {
   if (req.path === '/health' || req.path === '/metrics') return next();
   const start = Date.now();
   res.on('finish', () => {
-    logger.info('Request handled', {
-      method: req.method,
-      path: req.path,
-      status: res.statusCode,
-      duration_ms: Date.now() - start,
-    });
+    logger.info('Request handled', { method: req.method, path: req.path, status: res.statusCode, duration_ms: Date.now() - start });
   });
   next();
 });
@@ -45,22 +40,45 @@ app.get('/health', (req, res) => {
   });
 });
 
+const templates = {
+  order_created: true,
+  order_confirmed: true,
+  order_shipped: true,
+  order_delivered: true,
+  order_cancelled: true,
+  low_stock: true,
+};
+
 app.post('/notify', (req, res) => {
-  const { orderId, total } = req.body;
-  if (!orderId) return res.status(400).json({ error: 'orderId requis' });
+  const { type, userId, orderId } = req.body;
+  if (!type || !templates[type]) return res.status(400).json({ error: 'Unknown notification type' });
 
   const notif = {
-    id: notifications.length + 1,
+    id: 'notif-' + Date.now(),
+    type,
+    userId,
     orderId,
-    message: `Commande #${orderId} confirmée — Total : ${total} €`,
     sentAt: new Date().toISOString(),
   };
   notifications.push(notif);
-  logger.info('Notification sent', { message: notif.message, orderId: notif.orderId });
+  logger.info('Email sent', { type, userId, orderId });
   res.status(201).json(notif);
 });
 
-app.get('/notifications', (req, res) => res.json(notifications));
+app.get('/notifications/stats', (req, res) => {
+  const byType = {};
+  notifications.forEach(n => {
+    byType[n.type] = (byType[n.type] || 0) + 1;
+  });
+  res.json({ byType });
+});
+
+app.get('/notifications', (req, res) => {
+  let filtered = notifications;
+  if (req.query.userId) filtered = filtered.filter(n => n.userId === req.query.userId);
+  if (req.query.type) filtered = filtered.filter(n => n.type === req.query.type);
+  res.json(filtered);
+});
 
 app.get('/metrics', (req, res) => {
   res.set('Content-Type', 'text/plain; version=0.0.4');
@@ -78,18 +96,9 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = 3004;
-const server = app.listen(PORT, () => {
-  logger.info('Service started', { port: PORT });
-});
+const server = app.listen(PORT, () => logger.info('Service started', { port: PORT }));
 
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down gracefully...');
-  server.close(() => {
-    logger.info('Server closed — all connections drained');
-    process.exit(0);
-  });
-  setTimeout(() => {
-    logger.error('Forced shutdown after timeout');
-    process.exit(1);
-  }, 10000);
+  server.close(() => process.exit(0));
 });
